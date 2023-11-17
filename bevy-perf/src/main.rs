@@ -1,9 +1,12 @@
-use bevy::{prelude::*, window::PresentMode};
+use bevy::{
+    core::TaskPoolThreadAssignmentPolicy, pbr::ClusterConfig, prelude::*,
+    tasks::available_parallelism, window::PresentMode,
+};
 use bevy_screen_diagnostics::{ScreenDiagnosticsPlugin, ScreenFrameDiagnosticsPlugin};
 // use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy_turborand::prelude::*;
 
-use std::f32::consts::PI;
+use std::{f32::consts::PI, time::Duration};
 
 const COUNT: usize = 20000;
 const SIZE: f32 = 100.0;
@@ -11,13 +14,29 @@ const MOVESPEED: f32 = 5.0;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                present_mode: PresentMode::Immediate,
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        present_mode: PresentMode::Immediate,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(TaskPoolPlugin {
+                    task_pool_options: TaskPoolOptions {
+                        compute: TaskPoolThreadAssignmentPolicy {
+                            // set the minimum # of compute threads
+                            // to the total number of available threads
+                            min_threads: available_parallelism(),
+                            max_threads: std::usize::MAX, // unlimited max threads
+                            percent: 1.0,                 // this value is irrelevant in this case
+                        },
+                        // keep the defaults for everything else
+                        ..default()
+                    },
+                }),
+        )
         .add_plugins(ScreenDiagnosticsPlugin::default())
         .add_plugins(ScreenFrameDiagnosticsPlugin)
         // .add_plugins((LogDiagnosticsPlugin::default(), FrameTimeDiagnosticsPlugin))
@@ -59,10 +78,13 @@ fn setup(
     });
 
     // camera
-    commands.spawn(Camera3dBundle {
-        transform: Transform::from_xyz(0.0, 90.0, 90.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..default()
-    });
+    commands.spawn((
+        Camera3dBundle {
+            transform: Transform::from_xyz(0.0, 90.0, 90.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ..default()
+        },
+        ClusterConfig::Single,
+    ));
 }
 
 #[derive(Component)]
@@ -87,7 +109,7 @@ pub struct DropTarget {
 
 #[derive(Component)]
 pub struct Cooldown {
-    pub time_left: f32,
+    pub time_left: Duration,
 }
 
 fn place_items(
@@ -110,6 +132,7 @@ fn place_items(
                 )),
                 ..default()
             },
+            RngComponent::new(),
             RobotTarget {},
         ));
     }
@@ -135,6 +158,7 @@ fn place_robots(
                 )),
                 ..default()
             },
+            RngComponent::new(),
             Robot {},
         ));
     }
@@ -155,7 +179,7 @@ fn robot_target_system(
     mut commands: Commands,
 ) {
     let mut items = unattached.iter();
-    for entity in empty_robots.iter() {
+    empty_robots.for_each(|entity| {
         let Some((item, position)) = items.next() else {
             return; // no empty items, return
         };
@@ -165,87 +189,104 @@ fn robot_target_system(
             item,
             position: position.translation,
         });
-    }
+    });
 }
 
 fn robot_move_to_carry_system(
-    mut robots: Query<(Entity, &mut Transform, &CarryTarget)>,
+    mut robots: Query<(Entity, &mut Transform, &CarryTarget, &mut RngComponent)>,
     time: Res<Time>,
-    mut commands: Commands,
-    mut global_rng: ResMut<GlobalRng>,
+    commands: ParallelCommands,
 ) {
-    for (entity, mut transform, target) in &mut robots {
-        let distance_sq = target.position.distance_squared(transform.translation);
-        if distance_sq < 0.1 {
-            let position = generate_random_position_on_map(&mut global_rng, 2.0);
-            commands
-                .entity(entity)
-                .insert(DropTarget { position })
-                .remove::<CarryTarget>();
-            commands
-                .entity(target.item)
-                .set_parent(entity)
-                .insert(Transform::from_translation(Vec3 {
-                    x: 0.0,
-                    y: 2.0,
-                    z: 0.0,
-                }));
-            continue;
-        }
+    robots
+        .par_iter_mut()
+        .for_each(|(entity, mut transform, target, mut rng)| {
+            let distance_sq = target.position.distance_squared(transform.translation);
+            if distance_sq < 0.1 {
+                let position = generate_random_position_on_map_rng(&mut rng, 2.0);
+                commands.command_scope(|mut commands| {
+                    commands
+                        .entity(entity)
+                        .insert(DropTarget { position })
+                        .remove::<CarryTarget>();
+                    commands.entity(target.item).set_parent(entity).insert(
+                        Transform::from_translation(Vec3 {
+                            x: 0.0,
+                            y: 2.0,
+                            z: 0.0,
+                        }),
+                    );
+                });
+                return;
+            }
 
-        let direction = (target.position - transform.translation).normalize();
-        transform.translation += direction * MOVESPEED * time.delta_seconds();
-    }
+            let direction = (target.position - transform.translation).normalize();
+            transform.translation += direction * MOVESPEED * time.delta_seconds();
+        });
 }
 
 fn robot_move_to_drop_system(
-    mut robots: Query<(Entity, &mut Transform, &DropTarget, &Children)>,
+    mut robots: Query<(
+        Entity,
+        &mut Transform,
+        &DropTarget,
+        &Children,
+        &mut RngComponent,
+    )>,
     time: Res<Time>,
-    mut commands: Commands,
-    mut global_rng: ResMut<GlobalRng>,
+    commands: ParallelCommands,
 ) {
-    for (entity, mut transform, target, children) in &mut robots {
-        let distance_sq = target.position.distance_squared(transform.translation);
-        if distance_sq < 0.1 {
-            for &child in children.iter() {
-                let pos = generate_random_position_by_offset(
-                    &mut global_rng,
-                    2.0,
-                    transform.translation,
-                    2.0,
-                );
-                commands
-                    .entity(child)
-                    .remove_parent()
-                    .insert(Transform::from_translation(pos))
-                    .remove::<AttachedToRobot>();
+    robots
+        .par_iter_mut()
+        .for_each(|(entity, mut transform, target, children, mut rng)| {
+            let distance_sq = target.position.distance_squared(transform.translation);
+            if distance_sq < 0.1 {
+                for &child in children.iter() {
+                    let pos = generate_random_position_by_offset(
+                        &mut rng,
+                        2.0,
+                        transform.translation,
+                        2.0,
+                    );
+                    commands.command_scope(|mut commands| {
+                        commands
+                            .entity(child)
+                            .remove_parent()
+                            .insert(Transform::from_translation(pos))
+                            .remove::<AttachedToRobot>();
+                    });
+                }
+
+                let time_left = Duration::from_secs_f32(rng.f32() * 3.0);
+                commands.command_scope(|mut commands| {
+                    commands
+                        .entity(entity)
+                        .insert(Cooldown { time_left })
+                        .remove::<DropTarget>();
+                });
+
+                return;
             }
 
-            let time_left = global_rng.f32() * 3.0;
-            commands
-                .entity(entity)
-                .insert(Cooldown { time_left })
-                .remove::<DropTarget>();
-
-            continue;
-        }
-
-        let direction = (target.position - transform.translation).normalize();
-        transform.translation += direction * MOVESPEED * time.delta_seconds();
-    }
+            let direction = (target.position - transform.translation).normalize();
+            transform.translation += direction * MOVESPEED * time.delta_seconds();
+        });
 }
 
 fn robot_cooldown_system(
     mut robots: Query<(Entity, &mut Cooldown)>,
     time: Res<Time>,
-    mut commands: Commands,
+    commands: ParallelCommands,
 ) {
-    for (entity, mut cooldown) in &mut robots {
-        cooldown.time_left -= time.delta_seconds();
-        if cooldown.time_left < 0.0 {
-            commands.entity(entity).remove::<Cooldown>();
+    robots.par_iter_mut().for_each(|(entity, mut cooldown)| {
+        cooldown.time_left = cooldown
+            .time_left
+            .saturating_sub(Duration::from_secs_f32(time.delta_seconds()));
+        if cooldown.time_left.is_zero() {
+            commands.command_scope(|mut commands| {
+                commands.entity(entity).remove::<Cooldown>();
+            });
         }
-    }
+    });
 }
 
 fn generate_random_position_on_map(global_rng: &mut ResMut<GlobalRng>, y: f32) -> Vec3 {
@@ -255,14 +296,21 @@ fn generate_random_position_on_map(global_rng: &mut ResMut<GlobalRng>, y: f32) -
     Vec3 { x, y, z }
 }
 
+fn generate_random_position_on_map_rng(rng: &mut RngComponent, y: f32) -> Vec3 {
+    let x = (rng.f32() - 0.5) * SIZE;
+    let z = (rng.f32() - 0.5) * SIZE;
+
+    Vec3 { x, y, z }
+}
+
 fn generate_random_position_by_offset(
-    global_rng: &mut ResMut<GlobalRng>,
+    rng: &mut RngComponent,
     y: f32,
     pos: Vec3,
     offset: f32,
 ) -> Vec3 {
-    let x = (global_rng.f32() - 0.5) * offset + pos.x;
-    let z = (global_rng.f32() - 0.5) * offset + pos.z;
+    let x = (rng.f32() - 0.5) * offset + pos.x;
+    let z = (rng.f32() - 0.5) * offset + pos.z;
 
     Vec3 { x, y, z }
 }

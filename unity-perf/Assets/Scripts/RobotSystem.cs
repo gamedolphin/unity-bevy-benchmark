@@ -134,10 +134,10 @@ public partial struct RobotMoveToCarrySystem : ISystem
                     var rnd = Random.CreateFromIndex(seedOffset + (uint)index);
                     var pos = (rnd.NextFloat2() - new float2(0.5f, 0.5f)) * maxSize;
                     var pos2 = (rnd.NextFloat() - 0.5f) * 10;
-                    ecb.AddComponent(index, entity, new DropTarget { position = new float3(pos.x, 2f, pos.y) });
+                    ecb.AddComponent(index, entity, new DropTarget { position = new float3(pos.x, pos.y, 0f) });
                     ecb.RemoveComponent<CarryTarget>(index, entity);
                     ecb.AddComponent(index, item, new Parent { Value = entity });
-                    ecb.SetComponent(index, item, LocalTransform.FromPositionRotationScale(new float3(0, 2f, 0), targetPosition.Rotation, 0.5f));
+                    ecb.SetComponent(index, item, LocalTransform.FromPositionRotationScale(new float3(0, 0.5f, 0), targetPosition.Rotation, 0.5f));
                     return;
                 }
 
@@ -208,8 +208,8 @@ public partial struct RobotMoveToDropSystem : ISystem
                     ecb.RemoveComponent<Parent>(index, children);
                     ecb.RemoveComponent<AttachedToRobot>(index, children);
                     var pos = (rnd.NextFloat2() - new float2(0.5f, 0.5f)) * 2f;
-                    var finalPos = new float2(transform.Position.x, transform.Position.z) + pos;
-                    var dropPos = new float3(finalPos.x, 2f, finalPos.y);
+                    var finalPos = new float2(transform.Position.x, transform.Position.y) + pos;
+                    var dropPos = new float3(finalPos.x, finalPos.y, 0f);
                     ecb.AddComponent(index, children, LocalTransform.FromPositionRotationScale(dropPos, transform.Rotation, 0.5f));
                 }
 

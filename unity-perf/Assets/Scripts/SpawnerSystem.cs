@@ -23,7 +23,7 @@ public partial struct SpawnerSystem : ISystem
         {
             var transform = SystemAPI.GetComponentRW<LocalTransform>(entity);
             var pos = (random.NextFloat2() - new float2(0.5f, 0.5f)) * spawner.maxSize;
-            transform.ValueRW.Position = new float3(pos.x, 2f, pos.y);
+            transform.ValueRW.Position = new float3(pos.x, pos.y, 0f);
         }
 
         var robots = state.EntityManager.Instantiate(spawner.robot, spawner.count, Allocator.Temp);
@@ -32,7 +32,7 @@ public partial struct SpawnerSystem : ISystem
         {
             var transform = SystemAPI.GetComponentRW<LocalTransform>(entity);
             var pos = (random.NextFloat2() - new float2(0.5f, 0.5f)) * spawner.maxSize;
-            transform.ValueRW.Position = new float3(pos.x, 2f, pos.y);
+            transform.ValueRW.Position = new float3(pos.x, pos.y, 0f);
         }
 
         state.Enabled = false;

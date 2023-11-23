@@ -10,11 +10,11 @@
           pkgs = import nixpkgs {
             inherit system;
           };
-          nativeBuildInputs = with pkgs;[ pkg-config lld ];
+          nativeBuildInputs = with pkgs;[ pkg-config lld tracy ];
           buildInputs = with pkgs; [
               udev alsa-lib vulkan-loader
               xorg.libX11 xorg.libXcursor xorg.libXi xorg.libXrandr # To use the x11 feature
-              libxkbcommon wayland # To use the wayland feature              
+              libxkbcommon wayland # To use the wayland feature
             ];
         in
         with pkgs;

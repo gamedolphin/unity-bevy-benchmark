@@ -1,6 +1,11 @@
 use bevy::{
-    core::TaskPoolThreadAssignmentPolicy, pbr::ClusterConfig, prelude::*,
-    tasks::available_parallelism, window::PresentMode,
+    core::TaskPoolThreadAssignmentPolicy,
+    core_pipeline::prepass::{DeferredPrepass, DepthPrepass, MotionVectorPrepass, NormalPrepass},
+    pbr::{ClusterConfig, DefaultOpaqueRendererMethod},
+    prelude::*,
+    sprite::{MaterialMesh2dBundle, Mesh2dHandle},
+    tasks::available_parallelism,
+    window::PresentMode,
 };
 use bevy_screen_diagnostics::{ScreenDiagnosticsPlugin, ScreenFrameDiagnosticsPlugin};
 // use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
@@ -8,21 +13,14 @@ use bevy_turborand::prelude::*;
 
 use std::{f32::consts::PI, time::Duration};
 
-const COUNT: usize = 20000;
-const SIZE: f32 = 100.0;
-const MOVESPEED: f32 = 5.0;
+const COUNT: usize = 500000;
+const SIZE: f32 = 100000.0;
+const MOVESPEED: f32 = 100.0;
 
 fn main() {
     App::new()
         .add_plugins(
             DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        present_mode: PresentMode::Immediate,
-                        ..default()
-                    }),
-                    ..default()
-                })
                 .set(TaskPoolPlugin {
                     task_pool_options: TaskPoolOptions {
                         compute: TaskPoolThreadAssignmentPolicy {
@@ -35,8 +33,17 @@ fn main() {
                         // keep the defaults for everything else
                         ..default()
                     },
+                })
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        present_mode: PresentMode::Immediate,
+                        ..default()
+                    }),
+                    ..default()
                 }),
         )
+        .insert_resource(Msaa::Off)
+        .insert_resource(DefaultOpaqueRendererMethod::forward())
         .add_plugins(ScreenDiagnosticsPlugin::default())
         .add_plugins(ScreenFrameDiagnosticsPlugin)
         // .add_plugins((LogDiagnosticsPlugin::default(), FrameTimeDiagnosticsPlugin))
@@ -56,35 +63,8 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // plane base
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane::from_size(SIZE))),
-        material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
-        ..default()
-    });
-
-    // light
-    commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight {
-            shadows_enabled: false,
-            ..default()
-        },
-        transform: Transform {
-            translation: Vec3::new(0.0, 2.0, 0.0),
-            rotation: Quat::from_rotation_x(-PI / 4.),
-            ..default()
-        },
-        ..default()
-    });
-
     // camera
-    commands.spawn((
-        Camera3dBundle {
-            transform: Transform::from_xyz(0.0, 90.0, 90.0).looking_at(Vec3::ZERO, Vec3::Y),
-            ..default()
-        },
-        ClusterConfig::Single,
-    ));
+    commands.spawn(Camera2dBundle::new_with_far(1.0));
 }
 
 #[derive(Component)]
@@ -115,15 +95,15 @@ pub struct Cooldown {
 fn place_items(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
     mut global_rng: ResMut<GlobalRng>,
 ) {
-    let mesh = meshes.add(Mesh::from(shape::Cube { size: 0.5 }));
-    let material = materials.add(Color::rgb(1.0, 0.9, 0.0).into());
+    let mesh: Mesh2dHandle = meshes.add(shape::Circle::new(10.0).into()).into();
+    let material = materials.add(ColorMaterial::from(Color::YELLOW));
 
     for _n in 1..COUNT {
         commands.spawn((
-            PbrBundle {
+            MaterialMesh2dBundle {
                 mesh: mesh.clone(),
                 material: material.clone(),
                 transform: Transform::from_translation(generate_random_position_on_map(
@@ -141,15 +121,17 @@ fn place_items(
 fn place_robots(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
     mut global_rng: ResMut<GlobalRng>,
 ) {
-    let mesh = meshes.add(Mesh::from(shape::Box::new(0.5, 2.0, 0.5)));
-    let material = materials.add(Color::rgb(0.37, 0.8, 1.0).into());
+    let mesh: Mesh2dHandle = meshes
+        .add(shape::Quad::new(Vec2::new(20., 40.)).into())
+        .into();
+    let material = materials.add(ColorMaterial::from(Color::LIME_GREEN));
 
     for _n in 1..COUNT {
         commands.spawn((
-            PbrBundle {
+            MaterialMesh2dBundle {
                 mesh: mesh.clone(),
                 material: material.clone(),
                 transform: Transform::from_translation(generate_random_position_on_map(
@@ -178,6 +160,7 @@ fn robot_target_system(
     >,
     mut commands: Commands,
 ) {
+    let _ = info_span!("robot_target_system").entered();
     let mut items = unattached.iter();
     empty_robots.for_each(|entity| {
         let Some((item, position)) = items.next() else {
@@ -197,6 +180,7 @@ fn robot_move_to_carry_system(
     time: Res<Time>,
     commands: ParallelCommands,
 ) {
+    let _ = info_span!("robot_move_to_carry_system").entered();
     robots
         .par_iter_mut()
         .for_each(|(entity, mut transform, target, mut rng)| {
@@ -235,6 +219,7 @@ fn robot_move_to_drop_system(
     time: Res<Time>,
     commands: ParallelCommands,
 ) {
+    let _ = info_span!("robot_move_to_drop_system").entered();
     robots
         .par_iter_mut()
         .for_each(|(entity, mut transform, target, children, mut rng)| {
@@ -277,6 +262,7 @@ fn robot_cooldown_system(
     time: Res<Time>,
     commands: ParallelCommands,
 ) {
+    let _ = info_span!("robot_cooldown_system").entered();
     robots.par_iter_mut().for_each(|(entity, mut cooldown)| {
         cooldown.time_left = cooldown
             .time_left
@@ -291,16 +277,16 @@ fn robot_cooldown_system(
 
 fn generate_random_position_on_map(global_rng: &mut ResMut<GlobalRng>, y: f32) -> Vec3 {
     let x = (global_rng.f32() - 0.5) * SIZE;
-    let z = (global_rng.f32() - 0.5) * SIZE;
+    let y = (global_rng.f32() - 0.5) * SIZE;
 
-    Vec3 { x, y, z }
+    Vec3 { x, y, z: 0. }
 }
 
 fn generate_random_position_on_map_rng(rng: &mut RngComponent, y: f32) -> Vec3 {
     let x = (rng.f32() - 0.5) * SIZE;
-    let z = (rng.f32() - 0.5) * SIZE;
+    let y = (rng.f32() - 0.5) * SIZE;
 
-    Vec3 { x, y, z }
+    Vec3 { x, y, z: 0. }
 }
 
 fn generate_random_position_by_offset(
@@ -310,7 +296,7 @@ fn generate_random_position_by_offset(
     offset: f32,
 ) -> Vec3 {
     let x = (rng.f32() - 0.5) * offset + pos.x;
-    let z = (rng.f32() - 0.5) * offset + pos.z;
+    let y = (rng.f32() - 0.5) * offset + pos.z;
 
-    Vec3 { x, y, z }
+    Vec3 { x, y, z: 0. }
 }

@@ -169,8 +169,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   count: 20000
   maxSize: 100
-  item: {fileID: 3234714789610195884, guid: 43fa4daf639c96f658bc21254cba8fb1, type: 3}
-  robot: {fileID: 4808735103163623177, guid: b27db68f2e7b6c18394c7ae1bf2118f0, type: 3}
+  item: {fileID: 12357645767120579, guid: 4c12e863015253cf7b39daec196584a6, type: 3}
+  robot: {fileID: 8773748457996320828, guid: 131711e3837b14ee8847afa0d7b40ab6, type: 3}
   robotSpeed: 5
 --- !u!1660057539 &9223372036854775807
 SceneRoots:

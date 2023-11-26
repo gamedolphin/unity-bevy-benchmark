@@ -10,12 +10,23 @@ public partial struct SpawnerSystem : ISystem
     public void OnCreate(ref SystemState state)
     {
         state.RequireForUpdate<SpawnerComponent>();
+        state.RequireForUpdate<FileSpawnerInfo>();
     }
 
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
         var spawner = SystemAPI.GetSingleton<SpawnerComponent>();
+        var fileInfo = SystemAPI.GetSingleton<FileSpawnerInfo>();
+
+        if (fileInfo.Exists)
+        {
+            spawner.count = fileInfo.count;
+            spawner.maxSize = fileInfo.maxSize;
+            spawner.robotSpeed = fileInfo.robotSpeed;
+            SystemAPI.SetSingleton(spawner);
+        }
+
         var instances = state.EntityManager.Instantiate(spawner.item, spawner.count, Allocator.Temp);
         state.EntityManager.AddComponent<RobotTarget>(instances);
         var random = Random.CreateFromIndex(1000);

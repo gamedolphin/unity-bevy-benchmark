@@ -1,10 +1,14 @@
 use bevy::{
-    core::TaskPoolThreadAssignmentPolicy, pbr::ClusterConfig, prelude::*,
-    tasks::available_parallelism, window::PresentMode,
+    core::TaskPoolThreadAssignmentPolicy,
+    pbr::ClusterConfig,
+    prelude::*,
+    tasks::available_parallelism,
+    window::{PresentMode, WindowResolution},
 };
 use bevy_screen_diagnostics::{ScreenDiagnosticsPlugin, ScreenFrameDiagnosticsPlugin};
 // use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy_turborand::prelude::*;
+use serde::Deserialize;
 
 use std::{f32::consts::PI, time::Duration};
 
@@ -12,12 +16,41 @@ const COUNT: usize = 20000;
 const SIZE: f32 = 100.0;
 const MOVESPEED: f32 = 5.0;
 
+#[derive(Resource, Deserialize)]
+pub struct Configuration {
+    count: usize,
+    size: f32,
+    speed: f32,
+    camera: Vec3,
+}
+
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    let mut config = Configuration {
+        count: COUNT,
+        size: SIZE,
+        speed: MOVESPEED,
+        camera: Vec3 {
+            x: 0.0,
+            y: 90.0,
+            z: 90.0,
+        },
+    };
+
+    if args.len() >= 2 {
+        let config_path = &args[1];
+        let contents = std::fs::read_to_string(config_path).unwrap();
+        config = serde_json::from_str(&contents).unwrap();
+    }
+
     App::new()
+        .insert_resource(config)
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {
+                        resolution: (400., 300.).into(),
                         present_mode: PresentMode::Immediate,
                         ..default()
                     }),
@@ -53,12 +86,13 @@ fn main() {
 
 fn setup(
     mut commands: Commands,
+    config: Res<Configuration>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // plane base
     commands.spawn(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane::from_size(SIZE))),
+        mesh: meshes.add(Mesh::from(shape::Plane::from_size(config.size))),
         material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
         ..default()
     });
@@ -80,7 +114,8 @@ fn setup(
     // camera
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(0.0, 90.0, 90.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(config.camera.x, config.camera.y, config.camera.z)
+                .looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
         ClusterConfig::Single,
@@ -113,6 +148,7 @@ pub struct Cooldown {
 }
 
 fn place_items(
+    config: Res<Configuration>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -121,12 +157,13 @@ fn place_items(
     let mesh = meshes.add(Mesh::from(shape::Cube { size: 0.5 }));
     let material = materials.add(Color::rgb(1.0, 0.9, 0.0).into());
 
-    for _n in 1..COUNT {
+    for _n in 1..config.count {
         commands.spawn((
             PbrBundle {
                 mesh: mesh.clone(),
                 material: material.clone(),
                 transform: Transform::from_translation(generate_random_position_on_map(
+                    config.size,
                     &mut global_rng,
                     2.0,
                 )),
@@ -139,6 +176,7 @@ fn place_items(
 }
 
 fn place_robots(
+    config: Res<Configuration>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -147,12 +185,13 @@ fn place_robots(
     let mesh = meshes.add(Mesh::from(shape::Box::new(0.5, 2.0, 0.5)));
     let material = materials.add(Color::rgb(0.37, 0.8, 1.0).into());
 
-    for _n in 1..COUNT {
+    for _n in 1..config.count {
         commands.spawn((
             PbrBundle {
                 mesh: mesh.clone(),
                 material: material.clone(),
                 transform: Transform::from_translation(generate_random_position_on_map(
+                    config.size,
                     &mut global_rng,
                     2.0,
                 )),
@@ -193,6 +232,7 @@ fn robot_target_system(
 }
 
 fn robot_move_to_carry_system(
+    config: Res<Configuration>,
     mut robots: Query<(Entity, &mut Transform, &CarryTarget, &mut RngComponent)>,
     time: Res<Time>,
     commands: ParallelCommands,
@@ -202,7 +242,7 @@ fn robot_move_to_carry_system(
         .for_each(|(entity, mut transform, target, mut rng)| {
             let distance_sq = target.position.distance_squared(transform.translation);
             if distance_sq < 0.1 {
-                let position = generate_random_position_on_map_rng(&mut rng, 2.0);
+                let position = generate_random_position_on_map_rng(config.size, &mut rng, 2.0);
                 commands.command_scope(|mut commands| {
                     commands
                         .entity(entity)
@@ -220,11 +260,12 @@ fn robot_move_to_carry_system(
             }
 
             let direction = (target.position - transform.translation).normalize();
-            transform.translation += direction * MOVESPEED * time.delta_seconds();
+            transform.translation += direction * config.speed * time.delta_seconds();
         });
 }
 
 fn robot_move_to_drop_system(
+    config: Res<Configuration>,
     mut robots: Query<(
         Entity,
         &mut Transform,
@@ -268,7 +309,7 @@ fn robot_move_to_drop_system(
             }
 
             let direction = (target.position - transform.translation).normalize();
-            transform.translation += direction * MOVESPEED * time.delta_seconds();
+            transform.translation += direction * config.speed * time.delta_seconds();
         });
 }
 
@@ -289,16 +330,16 @@ fn robot_cooldown_system(
     });
 }
 
-fn generate_random_position_on_map(global_rng: &mut ResMut<GlobalRng>, y: f32) -> Vec3 {
-    let x = (global_rng.f32() - 0.5) * SIZE;
-    let z = (global_rng.f32() - 0.5) * SIZE;
+fn generate_random_position_on_map(size: f32, global_rng: &mut ResMut<GlobalRng>, y: f32) -> Vec3 {
+    let x = (global_rng.f32() - 0.5) * size;
+    let z = (global_rng.f32() - 0.5) * size;
 
     Vec3 { x, y, z }
 }
 
-fn generate_random_position_on_map_rng(rng: &mut RngComponent, y: f32) -> Vec3 {
-    let x = (rng.f32() - 0.5) * SIZE;
-    let z = (rng.f32() - 0.5) * SIZE;
+fn generate_random_position_on_map_rng(size: f32, rng: &mut RngComponent, y: f32) -> Vec3 {
+    let x = (rng.f32() - 0.5) * size;
+    let z = (rng.f32() - 0.5) * size;
 
     Vec3 { x, y, z }
 }

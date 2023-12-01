@@ -346,6 +346,8 @@ dependencies = [
  "bevy",
  "bevy_screen_diagnostics",
  "bevy_turborand",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

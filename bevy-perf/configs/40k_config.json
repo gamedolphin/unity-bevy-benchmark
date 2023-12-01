@@ -1,0 +1,6 @@
+{
+    "count" : 40000,
+    "maxSize": 100,
+    "robotSpeed": 5.0,
+    "cameraPosition" : { "x": 0.0, "y": 75.0, "z": -75.0 }
+}

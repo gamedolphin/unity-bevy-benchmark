@@ -1,9 +1,6 @@
 use bevy::{
-    core::TaskPoolThreadAssignmentPolicy,
-    pbr::ClusterConfig,
-    prelude::*,
-    tasks::available_parallelism,
-    window::{PresentMode, WindowResolution},
+    core::TaskPoolThreadAssignmentPolicy, pbr::ClusterConfig, prelude::*,
+    tasks::available_parallelism, window::PresentMode,
 };
 use bevy_screen_diagnostics::{ScreenDiagnosticsPlugin, ScreenFrameDiagnosticsPlugin};
 // use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
@@ -92,8 +89,12 @@ fn setup(
 ) {
     // plane base
     commands.spawn(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane::from_size(config.size))),
-        material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
+        // mesh: meshes.add(Mesh::from(shape::Plane::from_size(config.size))),
+        mesh: meshes.add(Mesh::from(
+            Plane3d::default().mesh().size(config.size, config.size),
+        )),
+
+        material: materials.add(Color::srgb(0.3, 0.5, 0.3)),
         ..default()
     });
 
@@ -154,8 +155,8 @@ fn place_items(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut global_rng: ResMut<GlobalRng>,
 ) {
-    let mesh = meshes.add(Mesh::from(shape::Cube { size: 0.5 }));
-    let material = materials.add(Color::rgb(1.0, 0.9, 0.0).into());
+    let mesh = meshes.add(Cuboid::from_length(0.5));
+    let material = materials.add(Color::srgb(1.0, 0.9, 0.0));
 
     for _n in 1..config.count {
         commands.spawn((
@@ -182,8 +183,14 @@ fn place_robots(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut global_rng: ResMut<GlobalRng>,
 ) {
-    let mesh = meshes.add(Mesh::from(shape::Box::new(0.5, 2.0, 0.5)));
-    let material = materials.add(Color::rgb(0.37, 0.8, 1.0).into());
+    let mesh = meshes.add(Cuboid::from_size(Vec3 {
+        x: 0.5,
+        y: 2.0,
+        z: 0.5,
+    }));
+
+    // let mesh = meshes.add(Mesh::from(shape::Box::new(0.5, 2.0, 0.5)));
+    let material = materials.add(Color::srgb(0.37, 0.8, 1.0));
 
     for _n in 1..config.count {
         commands.spawn((
@@ -218,7 +225,7 @@ fn robot_target_system(
     mut commands: Commands,
 ) {
     let mut items = unattached.iter();
-    empty_robots.for_each(|entity| {
+    empty_robots.iter().for_each(|entity| {
         let Some((item, position)) = items.next() else {
             return; // no empty items, return
         };
